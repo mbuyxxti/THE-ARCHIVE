@@ -1,0 +1,677 @@
+import tkinter as tk
+from tkinter import messagebox, ttk
+from collections import deque
+from datetime import datetime
+from dataclasses import dataclass, asdict
+from typing import List, Optional
+
+# ============================================================================
+# DATA STRUCTURES
+# ============================================================================
+
+@dataclass
+class ActivityLog:
+    """Tracks all operations performed on a record"""
+    operation: str  # "Created", "Updated", "Deleted", "Restored"
+    timestamp: str
+    details: str
+
+@dataclass
+class StudentRecord:
+    """Enhanced student record with timestamp tracking"""
+    id: str
+    name: str = ""
+    program: str = ""
+    year: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    deleted_at: str = ""
+    activity_history: List[ActivityLog] = None
+
+    def __post_init__(self):
+        if self.activity_history is None:
+            self.activity_history = []
+        if not self.created_at:
+            self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def log_activity(self, operation: str, details: str = ""):
+        """Record an activity in the history"""
+        activity = ActivityLog(
+            operation=operation,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            details=details
+        )
+        self.activity_history.append(activity)
+
+    def to_dict(self):
+        """Convert to dictionary, excluding activity_history for display"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "program": self.program,
+            "year": self.year,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
+        }
+
+# ============================================================================
+# GLOBAL STATE & DATA STRUCTURES
+# ============================================================================
+
+class StudentDatabase:
+    """Central database manager with activity tracking"""
+    def __init__(self):
+        self.students: List[StudentRecord] = []
+        self.deleted_records: deque = deque()  # For undo functionality
+        self.registration_queue: deque = deque()
+        self.operation_history: List[dict] = []
+
+    def add_operation_to_history(self, operation: str, student_id: str, details: str = ""):
+        """Log operation to global history"""
+        self.operation_history.append({
+            "operation": operation,
+            "student_id": student_id,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "details": details
+        })
+
+database = StudentDatabase()
+
+# ============================================================================
+# MODERN COLOR SCHEME
+# ============================================================================
+
+class ModernTheme:
+    """Modern color scheme for enhanced UI"""
+    PRIMARY = "#2C3E50"        # Dark navy blue
+    SECONDARY = "#3498DB"     # Bright blue
+    ACCENT = "#F39C12"        # Gold/Orange
+    SUCCESS = "#27AE60"       # Green
+    DANGER = "#E74C3C"        # Red
+    WARNING = "#F39C12"       # Orange
+    LIGHT_BG = "#ECF0F1"      # Light gray
+    DARK_TEXT = "#2C3E50"     # Dark text
+    LIGHT_TEXT = "#FFFFFF"    # White text
+    BORDER = "#BDC3C7"        # Subtle border
+    HOVER_SECONDARY = "#2980B9"  # Darker blue for hover
+    HOVER_ACCENT = "#E67E22"  # Darker gold for hover
+
+# ============================================================================
+# UI HELPER FUNCTIONS
+# ============================================================================
+
+def create_modern_button(parent, text, command, bg_color=ModernTheme.SECONDARY, 
+                        width=15, relief="flat"):
+    """Create a button with hover effects and modern styling"""
+    btn = tk.Button(
+        parent,
+        text=text,
+        command=command,
+        bg=bg_color,
+        fg=ModernTheme.LIGHT_TEXT,
+        font=("Segoe UI", 10, "bold"),
+        relief=relief,
+        padx=10,
+        pady=8,
+        width=width,
+        cursor="hand2",
+        activebackground=ModernTheme.HOVER_SECONDARY if bg_color == ModernTheme.SECONDARY 
+                         else ModernTheme.HOVER_ACCENT,
+        activeforeground=ModernTheme.LIGHT_TEXT,
+        bd=0
+    )
+    
+    # Add hover effects
+    def on_enter(event):
+        btn.config(relief="raised")
+    
+    def on_leave(event):
+        btn.config(relief="flat")
+    
+    btn.bind("<Enter>", on_enter)
+    btn.bind("<Leave>", on_leave)
+    
+    return btn
+
+def create_modern_entry(parent, placeholder=""):
+    """Create an entry field with modern styling"""
+    entry = tk.Entry(
+        parent,
+        font=("Segoe UI", 10),
+        relief="flat",
+        bd=0,
+        bg="white",
+        fg=ModernTheme.DARK_TEXT,
+        insertbackground=ModernTheme.SECONDARY
+    )
+    
+    # Add placeholder functionality
+    if placeholder:
+        entry.insert(0, placeholder)
+        entry.config(fg=ModernTheme.BORDER)
+        
+        def on_focus_in(event):
+            if entry.get() == placeholder:
+                entry.delete(0, tk.END)
+                entry.config(fg=ModernTheme.DARK_TEXT)
+        
+        def on_focus_out(event):
+            if entry.get() == "":
+                entry.insert(0, placeholder)
+                entry.config(fg=ModernTheme.BORDER)
+        
+        entry.bind("<FocusIn>", on_focus_in)
+        entry.bind("<FocusOut>", on_focus_out)
+    
+    return entry
+
+def show_feedback(title: str, message: str, msg_type: str = "info"):
+    """Display user-friendly feedback messages"""
+    if msg_type == "success":
+        messagebox.showinfo(title, f"✓ {message}")
+    elif msg_type == "error":
+        messagebox.showerror(title, f"✗ {message}")
+    elif msg_type == "warning":
+        messagebox.showwarning(title, f"⚠ {message}")
+    else:
+        messagebox.showinfo(title, message)
+
+def get_timestamp_string():
+    """Get current timestamp as formatted string"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# ============================================================================
+# CORE BUSINESS LOGIC - CRUD OPERATIONS WITH ACTIVITY TRACKING
+# ============================================================================
+
+def add_student():
+    """Add a new student with flexible validation and timestamping"""
+    sid = entry_id.get().strip()
+    name = entry_name.get().strip()
+    program = entry_program.get().strip()
+    year = entry_year.get().strip()
+
+    # Flexible validation: Student ID is mandatory, others are optional
+    if not sid:
+        show_feedback(
+            "Validation Error",
+            "Student ID is required to create a record.",
+            "error"
+        )
+        return
+
+    # Check for unique ID
+    for s in database.students:
+        if s.id == sid:
+            show_feedback(
+                "Duplicate Record",
+                f"A student with ID '{sid}' already exists. Please use a different ID.",
+                "error"
+            )
+            return
+
+    # Create new student record
+    student = StudentRecord(
+        id=sid,
+        name=name,
+        program=program,
+        year=year
+    )
+    
+    # Log the creation activity
+    student.log_activity("Created", f"New record created with {sum([bool(name), bool(program), bool(year)])} fields")
+    
+    # Add to system
+    database.students.append(student)
+    database.registration_queue.append(student)
+    database.add_operation_to_history("ADD", sid, f"Added: {name or 'N/A'}")
+    
+    # Provide friendly feedback
+    show_feedback(
+        "Record Created",
+        f"Student ID '{sid}' has been successfully added to the system.",
+        "success"
+    )
+    
+    clear_entries()
+    refresh_display()
+
+
+def search_student():
+    """Search for a student and display detailed information"""
+    sid = entry_id.get().strip()
+    
+    if not sid:
+        show_feedback("Search Error", "Please enter a Student ID to search.", "warning")
+        return
+    
+    for s in database.students:
+        if s.id == sid:
+            # Build detailed information message
+            details = f"""
+Student ID: {s.id}
+Name: {s.name or '(Not provided)'}
+Program: {s.program or '(Not provided)'}
+Year: {s.year or '(Not provided)'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Created: {s.created_at}
+Updated: {s.updated_at or 'Never'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Activity History: {len(s.activity_history)} action(s)
+            """
+            show_feedback("Student Found", details.strip(), "info")
+            return
+    
+    show_feedback(
+        "Not Found",
+        f"No student found with ID '{sid}'. Please check and try again.",
+        "warning"
+    )
+
+
+def update_student():
+    """Update student record with timestamp tracking"""
+    sid = entry_id.get().strip()
+    
+    if not sid:
+        show_feedback("Update Error", "Please enter a Student ID to update.", "warning")
+        return
+    
+    for s in database.students:
+        if s.id == sid:
+            # Store original values for change tracking
+            original = {
+                "name": s.name,
+                "program": s.program,
+                "year": s.year
+            }
+            
+            # Update with new values (allows partial updates)
+            new_name = entry_name.get().strip()
+            new_program = entry_program.get().strip()
+            new_year = entry_year.get().strip()
+            
+            changes = []
+            if new_name and new_name != original["name"]:
+                s.name = new_name
+                changes.append(f"Name: {original['name']} → {new_name}")
+            if new_program and new_program != original["program"]:
+                s.program = new_program
+                changes.append(f"Program: {original['program']} → {new_program}")
+            if new_year and new_year != original["year"]:
+                s.year = new_year
+                changes.append(f"Year: {original['year']} → {new_year}")
+            
+            if not changes:
+                show_feedback(
+                    "No Changes",
+                    "No new information provided. Record remains unchanged.",
+                    "warning"
+                )
+                return
+            
+            # Update timestamp and log activity
+            s.updated_at = get_timestamp_string()
+            change_summary = "; ".join(changes)
+            s.log_activity("Updated", change_summary)
+            database.add_operation_to_history("UPDATE", sid, change_summary)
+            
+            show_feedback(
+                "Record Updated",
+                f"Student ID '{sid}' has been successfully updated.\n\nChanges: {change_summary}",
+                "success"
+            )
+            
+            clear_entries()
+            refresh_display()
+            return
+    
+    show_feedback(
+        "Not Found",
+        f"No student found with ID '{sid}'. Cannot update non-existent record.",
+        "error"
+    )
+
+
+def delete_student():
+    """Delete student record with timestamp tracking"""
+    sid = entry_id.get().strip()
+    
+    if not sid:
+        show_feedback("Delete Error", "Please enter a Student ID to delete.", "warning")
+        return
+    
+    for i, s in enumerate(database.students):
+        if s.id == sid:
+            # Log deletion time
+            s.deleted_at = get_timestamp_string()
+            s.log_activity("Deleted", f"Record deleted at {s.deleted_at}")
+            
+            # Move to deleted stack for undo capability
+            deleted_student = database.students.pop(i)
+            database.deleted_records.append(deleted_student)
+            database.add_operation_to_history("DELETE", sid, f"Deleted: {s.name or 'N/A'}")
+            
+            show_feedback(
+                "Record Deleted",
+                f"Student ID '{sid}' has been removed. You can undo this action.",
+                "success"
+            )
+            
+            refresh_display()
+            return
+    
+    show_feedback(
+        "Not Found",
+        f"No student found with ID '{sid}'. Cannot delete non-existent record.",
+        "error"
+    )
+
+
+def undo_delete():
+    """Restore a deleted student record"""
+    if not database.deleted_records:
+        show_feedback(
+            "Nothing to Undo",
+            "No deleted records available. All previous deletions have been restored.",
+            "warning"
+        )
+        return
+    
+    student = database.deleted_records.pop()
+    
+    # Log restoration
+    student.deleted_at = ""  # Clear deletion timestamp
+    student.log_activity("Restored", f"Record restored from deletion at {get_timestamp_string()}")
+    
+    database.students.append(student)
+    database.add_operation_to_history("RESTORE", student.id, f"Restored: {student.name or 'N/A'}")
+    
+    show_feedback(
+        "Record Restored",
+        f"Student ID '{student.id}' has been restored to the system.",
+        "success"
+    )
+    
+    refresh_display()
+
+
+def view_activity_log():
+    """Display the activity history of all operations"""
+    if not database.operation_history:
+        show_feedback(
+            "Activity Log",
+            "No operations have been recorded yet.",
+            "info"
+        )
+        return
+    
+    # Build activity log message
+    log_text = "═══════════════════════════════════════════\n"
+    log_text += "SYSTEM ACTIVITY LOG\n"
+    log_text += "═══════════════════════════════════════════\n\n"
+    
+    for entry in database.operation_history[-10:]:  # Show last 10 operations
+        log_text += f"[{entry['timestamp']}] {entry['operation']}\n"
+        log_text += f"  Student ID: {entry['student_id']}\n"
+        log_text += f"  Details: {entry['details']}\n\n"
+    
+    show_feedback("Activity Log", log_text, "info")
+
+
+# ============================================================================
+# DISPLAY & UI MANAGEMENT
+# ============================================================================
+
+def refresh_display():
+    """Refresh the student table and statistics"""
+    # Clear existing rows
+    for row in student_table.get_children():
+        student_table.delete(row)
+    
+    # Insert current records with timestamps
+    for s in database.students:
+        student_table.insert(
+            "",
+            tk.END,
+            values=(
+                s.id,
+                s.name or "—",
+                s.program or "—",
+                s.year or "—",
+                s.created_at
+            ),
+            tags=("data",)
+        )
+    
+    # Update statistics
+    total = len(database.students)
+    complete = sum(1 for s in database.students if all([s.name, s.program, s.year]))
+    incomplete = total - complete
+    
+    count_label.config(
+        text=f"Total: {total}  |  Complete: {complete}  |  Incomplete: {incomplete}"
+    )
+    
+    # Update deleted count
+    deleted_count_label.config(text=f"Deleted (can undo): {len(database.deleted_records)}")
+
+
+def clear_entries():
+    """Clear all input fields"""
+    entry_id.delete(0, tk.END)
+    entry_name.delete(0, tk.END)
+    entry_program.delete(0, tk.END)
+    entry_year.delete(0, tk.END)
+    
+    # Reset placeholders
+    entry_id.insert(0, "e.g., STU001")
+    entry_name.insert(0, "Optional")
+    entry_program.insert(0, "Optional")
+    entry_year.insert(0, "Optional")
+
+
+def show_menu():
+    """Display the main menu interface"""
+    menu_button.pack_forget()
+    menu_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+
+# ============================================================================
+# MAIN TKINTER WINDOW
+# ============================================================================
+
+root = tk.Tk()
+root.title("Student Record Management System")
+root.geometry("900x750")
+root.config(bg=ModernTheme.LIGHT_BG)
+
+# ─────────────────────────────────────────────────────────────────────────
+# TITLE FRAME
+# ─────────────────────────────────────────────────────────────────────────
+
+title_frame = tk.Frame(root, bg=ModernTheme.PRIMARY, pady=15)
+title_frame.pack(fill="x")
+
+title_label = tk.Label(
+    title_frame,
+    text="📚 STUDENT RECORD MANAGEMENT SYSTEM",
+    font=("Segoe UI", 18, "bold"),
+    bg=ModernTheme.PRIMARY,
+    fg=ModernTheme.LIGHT_TEXT
+)
+title_label.pack()
+
+subtitle_label = tk.Label(
+    title_frame,
+    text="Enhanced with Activity Tracking & Flexible Data Entry",
+    font=("Segoe UI", 10),
+    bg=ModernTheme.PRIMARY,
+    fg=ModernTheme.LIGHT_BG
+)
+subtitle_label.pack()
+
+# ─────────────────────────────────────────────────────────────────────────
+# START BUTTON
+# ─────────────────────────────────────────────────────────────────────────
+
+menu_button = create_modern_button(
+    root,
+    "→ ENTER SYSTEM",
+    show_menu,
+    bg_color=ModernTheme.ACCENT,
+    width=20
+)
+menu_button.pack(pady=40)
+
+# ─────────────────────────────────────────────────────────────────────────
+# MAIN MENU FRAME (Hidden initially)
+# ─────────────────────────────────────────────────────────────────────────
+
+menu_frame = tk.Frame(root, bg=ModernTheme.LIGHT_BG)
+
+# INPUT SECTION
+input_frame = tk.LabelFrame(
+    menu_frame,
+    text="📝 Student Information",
+    font=("Segoe UI", 11, "bold"),
+    bg=ModernTheme.LIGHT_BG,
+    fg=ModernTheme.DARK_TEXT,
+    padx=10,
+    pady=10,
+    relief="flat",
+    bd=1,
+    borderwidth=1,
+    highlightthickness=1,
+    highlightbackground=ModernTheme.BORDER
+)
+input_frame.pack(fill="x", pady=10)
+
+# Input fields with labels
+input_grid = tk.Frame(input_frame, bg=ModernTheme.LIGHT_BG)
+input_grid.pack(fill="x")
+
+tk.Label(input_grid, text="Student ID *", font=("Segoe UI", 9, "bold"), 
+         bg=ModernTheme.LIGHT_BG, fg=ModernTheme.DARK_TEXT).grid(row=0, column=0, sticky="w", pady=5)
+entry_id = create_modern_entry(input_grid, "e.g., STU001")
+entry_id.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+
+tk.Label(input_grid, text="Name", font=("Segoe UI", 9, "bold"), 
+         bg=ModernTheme.LIGHT_BG, fg=ModernTheme.DARK_TEXT).grid(row=1, column=0, sticky="w", pady=5)
+entry_name = create_modern_entry(input_grid, "Optional")
+entry_name.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+
+tk.Label(input_grid, text="Program", font=("Segoe UI", 9, "bold"), 
+         bg=ModernTheme.LIGHT_BG, fg=ModernTheme.DARK_TEXT).grid(row=2, column=0, sticky="w", pady=5)
+entry_program = create_modern_entry(input_grid, "Optional")
+entry_program.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+
+tk.Label(input_grid, text="Year", font=("Segoe UI", 9, "bold"), 
+         bg=ModernTheme.LIGHT_BG, fg=ModernTheme.DARK_TEXT).grid(row=3, column=0, sticky="w", pady=5)
+entry_year = create_modern_entry(input_grid, "Optional")
+entry_year.grid(row=3, column=1, sticky="ew", padx=5, pady=5)
+
+input_grid.columnconfigure(1, weight=1)
+
+# BUTTON SECTION
+button_frame = tk.Frame(menu_frame, bg=ModernTheme.LIGHT_BG)
+button_frame.pack(fill="x", pady=10)
+
+btn_add = create_modern_button(button_frame, "✓ Add Student", add_student, 
+                               bg_color=ModernTheme.SUCCESS)
+btn_add.grid(row=0, column=0, padx=5)
+
+btn_search = create_modern_button(button_frame, "🔍 Search", search_student)
+btn_search.grid(row=0, column=1, padx=5)
+
+btn_update = create_modern_button(button_frame, "✎ Update", update_student)
+btn_update.grid(row=0, column=2, padx=5)
+
+btn_delete = create_modern_button(button_frame, "✕ Delete", delete_student, 
+                                 bg_color=ModernTheme.DANGER)
+btn_delete.grid(row=0, column=3, padx=5)
+
+btn_undo = create_modern_button(button_frame, "↶ Undo Delete", undo_delete, 
+                               bg_color=ModernTheme.WARNING)
+btn_undo.grid(row=1, column=0, padx=5, pady=5)
+
+btn_log = create_modern_button(button_frame, "📋 Activity Log", view_activity_log)
+btn_log.grid(row=1, column=1, columnspan=2, padx=5, pady=5)
+
+# TABLE SECTION
+table_frame = tk.LabelFrame(
+    menu_frame,
+    text="📊 Student Records",
+    font=("Segoe UI", 11, "bold"),
+    bg=ModernTheme.LIGHT_BG,
+    fg=ModernTheme.DARK_TEXT,
+    padx=5,
+    pady=5,
+    relief="flat",
+    bd=1,
+    highlightthickness=1,
+    highlightbackground=ModernTheme.BORDER
+)
+table_frame.pack(fill="both", expand=True, pady=10)
+
+# Create Treeview with enhanced styling
+style = ttk.Style()
+style.theme_use("clam")
+style.configure("Treeview", 
+                background=ModernTheme.LIGHT_TEXT,
+                foreground=ModernTheme.DARK_TEXT,
+                fieldbackground=ModernTheme.LIGHT_TEXT,
+                font=("Segoe UI", 9))
+style.configure("Treeview.Heading", 
+                background=ModernTheme.PRIMARY,
+                foreground=ModernTheme.LIGHT_TEXT,
+                font=("Segoe UI", 10, "bold"))
+style.map('Treeview', background=[('selected', ModernTheme.SECONDARY)])
+
+student_table = ttk.Treeview(
+    table_frame,
+    columns=("Student ID", "Name", "Program", "Year", "Created"),
+    show="headings",
+    height=10
+)
+student_table.pack(fill="both", expand=True)
+
+# Configure columns
+columns_config = [
+    ("Student ID", 80),
+    ("Name", 120),
+    ("Program", 120),
+    ("Year", 60),
+    ("Created", 150)
+]
+
+for col, width in columns_config:
+    student_table.heading(col, text=col)
+    student_table.column(col, width=width)
+
+# FOOTER SECTION
+footer_frame = tk.Frame(menu_frame, bg=ModernTheme.LIGHT_BG)
+footer_frame.pack(fill="x", pady=5)
+
+count_label = tk.Label(
+    footer_frame,
+    text="Total: 0  |  Complete: 0  |  Incomplete: 0",
+    font=("Segoe UI", 9, "bold"),
+    bg=ModernTheme.LIGHT_BG,
+    fg=ModernTheme.SECONDARY
+)
+count_label.pack(side="left", padx=5)
+
+deleted_count_label = tk.Label(
+    footer_frame,
+    text="Deleted (can undo): 0",
+    font=("Segoe UI", 9),
+    bg=ModernTheme.LIGHT_BG,
+    fg=ModernTheme.WARNING
+)
+deleted_count_label.pack(side="right", padx=5)
+
+# Start the application
+root.mainloop()
